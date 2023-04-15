@@ -50,7 +50,7 @@ def sift_ratio_match(ratio_thresh, dist_matrix):
             position.append((i, idx1))
 
     print("len matches: " + str(len(good_matches)))
-    if len(good_matches) < 30:
+    if len(good_matches) < 40:
         return None
 
     return good_matches
@@ -102,6 +102,7 @@ def residual_calculate(transformed_points, dst_points, e):
     final_inliers = np.concatenate((transformed_points[inliers_index], dst_points[inliers_index]), axis=1)
     return final_inliers
 
+
 '''
 def is_nice_homography(H):
     if len(H) == 0:
@@ -125,6 +126,7 @@ def is_nice_homography(H):
 
     return True
 '''
+
 
 def apply_ransac_homography(img1, img2, iterations=1000, e=5, threshold=0.8):
     # maybe its worth to convert img1, img2 to gray scale?
@@ -164,7 +166,7 @@ def apply_ransac_homography(img1, img2, iterations=1000, e=5, threshold=0.8):
         homography_matrix = cv2.getPerspectiveTransform(rnd_pairs1,
                                                         rnd_pairs2)
 
-        #is_correct_homography = is_nice_homography(homography_matrix)
+        # is_correct_homography = is_nice_homography(homography_matrix)
         is_correct_homography = True
         # is_correct_homography = True
         if is_correct_homography:
@@ -180,6 +182,7 @@ def apply_ransac_homography(img1, img2, iterations=1000, e=5, threshold=0.8):
             break
 
     return out_homography_matrix, max_inliers
+
 
 def test_if_match(img1, img2):
     # img1 = cv2.cvtColor(img1_color, cv2.COLOR_BGR2GRAY)
@@ -203,8 +206,10 @@ def test_if_match(img1, img2):
     if matches is None:
         return None
     return 1
+
+
 def apply_ransac_affine(img1, img2, iterations=1000, e=5, threshold=0.8):
-    #maybe its worth to convert to gray scale?
+    # maybe its worth to convert to gray scale?
 
     # img1 = cv2.cvtColor(img1_color, cv2.COLOR_BGR2GRAY)
 
@@ -355,15 +360,18 @@ all_affine_puzzle = get_affine_images_and_all_info()
 num_of_piece_for_each_affine_puzzle = []
 
 for i in range(len(all_affine_puzzle)):
-#for i in range(0, 0):
+#for i in range(1, 2):
     affine_puzzle_i, height, width, final_warp_mat = all_affine_puzzle[i]
 
-# num of matches so far
+    # num of matches so far
     nMatches = 0
-    j = random.randint(0, len(affine_puzzle_i)-1)
+    # j = random.randint(0, len(affine_puzzle_i)-1)
+    j = 0
     num_iterations = 0
+    # pieces assembled list
     matches_list = []
     imgOutput_affine = affine_puzzle_i[j]
+    imgOutput_affine = cv2.warpAffine(imgOutput_affine, final_warp_mat, (width, height), flags=cv2.INTER_CUBIC)
     while nMatches < len(affine_puzzle_i):
         if j not in matches_list and test_if_match(affine_puzzle_i[j], imgOutput_affine) is not None:
             h, inlier_pairs = apply_ransac_affine(affine_puzzle_i[j], imgOutput_affine)
@@ -380,28 +388,29 @@ for i in range(len(all_affine_puzzle)):
         if num_iterations > min(1000, (len(affine_puzzle_i)) ** 2):
             break
 
-    num_of_piece_for_each_affine_puzzle.append(nMatches)
+    num_of_piece_for_each_affine_puzzle.append((i + 1, nMatches))
 
-    imgOutput_affine = cv2.warpAffine(imgOutput_affine, final_warp_mat, (width, height), flags=cv2.INTER_CUBIC)
     figs = plt.figure(figsize=(8, 8))
     plt.imshow(imgOutput_affine)
-
 
 all_homography_puzzle = get_homography_images_and_all_info()
 num_of_piece_for_each_homography_puzzle = []
 
-#loop over all homography puzzles and assemble
-#for i in range(0, 0):
+# loop over all homography puzzles and assemble
+#for i in range(2, 3):
 for i in range(0, len(all_homography_puzzle)):
     homography_puzzle_i, height, width, final_warp_mat = all_homography_puzzle[i]
 
     # num of matches so far
     nMatches = 0
-    j = random.randint(0, len(homography_puzzle_i) - 1)
+    # j = random.randint(0, len(homography_puzzle_i) - 1)
+    j = 0
     num_iterations = 0
-    #pieces assembled
+    # pieces assembled list
     matches_list = []
     imgOutput_homography = homography_puzzle_i[j]
+    imgOutput_homography = cv2.warpPerspective(imgOutput_homography, final_warp_mat, (width, height),
+                                               flags=cv2.INTER_CUBIC)
     while nMatches < len(homography_puzzle_i):
         if j not in matches_list and test_if_match(homography_puzzle_i[j], imgOutput_homography) is not None:
             h, inlier_pairs = apply_ransac_homography(homography_puzzle_i[j], imgOutput_homography)
@@ -421,21 +430,20 @@ for i in range(0, len(all_homography_puzzle)):
         if num_iterations > min(1000, (len(homography_puzzle_i)) ** 2):
             break
 
-    num_of_piece_for_each_homography_puzzle.append(nMatches)
+    num_of_piece_for_each_homography_puzzle.append((i + 1, nMatches))
 
-    imgOutput_homography = cv2.warpPerspective(imgOutput_homography, final_warp_mat, (width, height),
-                                               flags=cv2.INTER_CUBIC)
     figs = plt.figure(figsize=(8, 8))
     plt.imshow(imgOutput_homography)
 
-# print results for affine puzzles
-for i in range(len(num_of_piece_for_each_affine_puzzle)):
-    print(
-        'for affine puzzle ' + str(i + 1) + ' we assembled ' + str(num_of_piece_for_each_affine_puzzle[i]) + '/' + str(
-            num_of_pieces_in_puzzle_affine[i]) + ' pieces ')
 
-#print results for homography puzzles
-for i in range(len(num_of_piece_for_each_homography_puzzle)):
-    print('for homography puzzle ' + str(i + 1) + ' we assembled ' + str(
-        num_of_piece_for_each_homography_puzzle[i]) + '/' + str(num_of_pieces_in_puzzle_homography[i]) + ' pieces ')
+print('##################### RESULTS #####################')
+# print results for affine puzzles
+for puzzle, nMatches in num_of_piece_for_each_affine_puzzle:
+    print('for affine puzzle', puzzle,
+          'we assembled ' + str(nMatches) + '/' + str(num_of_pieces_in_puzzle_affine[puzzle - 1]) + ' pieces')
+
+# print results for homography puzzles
+for puzzle, nMatches in num_of_piece_for_each_homography_puzzle:
+    print('for homography puzzle', puzzle,
+          'we assembled ' + str(nMatches) + '/' + str(num_of_pieces_in_puzzle_homography[puzzle - 1]) + ' pieces')
 plt.show()
