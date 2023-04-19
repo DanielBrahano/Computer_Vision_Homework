@@ -5,6 +5,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 import random
 from extract_info_from_puzzles import *
+from output_results import *
 
 
 def get_sift_detector_descriptor(image):
@@ -200,7 +201,7 @@ def test_if_match(img1, img2):
     return 1
 
 
-def apply_ransac_affine(img1, img2, iterations=10000, e=5, threshold=0.8, min_matches=35):
+def apply_ransac_affine(img1, img2, iterations=10000, e=5, threshold=0.8, min_matches=30):
     # get keypoints and descriptors
     kp1, desc1 = get_sift_detector_descriptor(img1)
     kp2, desc2 = get_sift_detector_descriptor(img2)
@@ -259,22 +260,25 @@ def apply_ransac_affine(img1, img2, iterations=10000, e=5, threshold=0.8, min_ma
 
 def wrap_and_print_affine(img1, img2, height, width, transformation_matrix):
     img_output = cv2.warpAffine(img1, transformation_matrix, (width, height), flags=cv2.INTER_CUBIC)
+    relative = img_output.copy()
     grayImg = cv2.cvtColor(img_output, cv2.COLOR_BGR2GRAY)
     for i in range(img2.shape[0]):
         for j in range(img2.shape[1]):
             if grayImg[i][j] == 0:
                 img_output[i][j] = img2[i][j]
-    return img_output
+    return img_output, relative
 
 
 def wrap_and_print_homography(img1, img2, height, width, transformation_matrix):
     img_output = cv2.warpPerspective(img1, transformation_matrix, (width, height), flags=cv2.INTER_CUBIC)
+    relative = img_output.copy()
     grayImg = cv2.cvtColor(img_output, cv2.COLOR_BGR2GRAY)
     for i in range(img1.shape[0]):
         for j in range(img2.shape[1]):
             if grayImg[i][j] == 0:
                 img_output[i][j] = img2[i][j]
-    return img_output
+    #save relative image
+    return img_output, relative
 
 
 # get all affine puzzles and info
@@ -282,7 +286,7 @@ all_affine_puzzle = get_affine_images_and_all_info()
 num_of_piece_for_each_affine_puzzle = []
 
 for i in range(len(all_affine_puzzle)):
-#for i in range(8, 10):
+#for i in range(7, 9):
     affine_puzzle_i, height, width, final_warp_mat = all_affine_puzzle[i]
     # how many iterations have been with no matches
     no_matches_in_puzzle = 0
@@ -299,14 +303,15 @@ for i in range(len(all_affine_puzzle)):
             # convert to gray scale
             affine_puzzle_i_j_gray = cv2.cvtColor(affine_puzzle_i[j], cv2.COLOR_BGR2GRAY)
             imgOutput_affine_gray = cv2.cvtColor(imgOutput_affine, cv2.COLOR_BGR2GRAY)
-            if j == 8:
-                h = apply_ransac_affine(affine_puzzle_i_j_gray, imgOutput_affine_gray, min_matches=13)
-            elif j == 9:
-                h = apply_ransac_affine(affine_puzzle_i_j_gray, imgOutput_affine_gray, min_matches=25)
+            if j == 7:
+                h = apply_ransac_affine(affine_puzzle_i_j_gray, imgOutput_affine_gray, min_matches=8)
+            elif j == 8:
+                h = apply_ransac_affine(affine_puzzle_i_j_gray, imgOutput_affine_gray, min_matches=17)
             else:
                 h = apply_ransac_affine(affine_puzzle_i_j_gray, imgOutput_affine_gray)
             if h is not None:
-                imgOutput_affine = wrap_and_print_affine(affine_puzzle_i[j], imgOutput_affine, height, width, h)
+                imgOutput_affine, relative = wrap_and_print_affine(affine_puzzle_i[j], imgOutput_affine, height, width, h)
+                save_relative_image(relative, 'homography', i+1, j+1)
                 nMatches = nMatches + 1
                 matches_list.append(j)
                 no_matches_in_puzzle = -1
@@ -325,6 +330,7 @@ for i in range(len(all_affine_puzzle)):
             break
 
     num_of_piece_for_each_affine_puzzle.append((i + 1, nMatches))
+    save_solution_image(imgOutput_affine,'affine',i,nMatches,len(affine_puzzle_i))
 
     figs = plt.figure(figsize=(8, 8))
     plt.imshow(imgOutput_affine)
@@ -333,7 +339,7 @@ all_homography_puzzle = get_homography_images_and_all_info()
 num_of_piece_for_each_homography_puzzle = []
 
 # loop over all homography puzzles and assemble
-#for i in range(8, 10):
+#for i in range(10, 10):
 for i in range(0, len(all_homography_puzzle)):
     homography_puzzle_i, height, width, final_warp_mat = all_homography_puzzle[i]
 
@@ -353,15 +359,14 @@ for i in range(0, len(all_homography_puzzle)):
             # convert to gray scale
             homography_puzzle_i_j_gray = cv2.cvtColor(homography_puzzle_i[j], cv2.COLOR_BGR2GRAY)
             imgOutput_homography_gray = cv2.cvtColor(imgOutput_homography, cv2.COLOR_BGR2GRAY)
-            if j == 6 or j == 7 or j == 8:
-                h = apply_ransac_homography(homography_puzzle_i_j_gray, imgOutput_homography_gray, min_matches=14)
-            elif j == 10:
-                h = apply_ransac_homography(homography_puzzle_i_j_gray, imgOutput_homography_gray, min_matches=25)
+            if j == 5 or j == 6 or j == 7:
+                h = apply_ransac_homography(homography_puzzle_i_j_gray, imgOutput_homography_gray, min_matches=10)
             else:
                 h = apply_ransac_homography(homography_puzzle_i_j_gray, imgOutput_homography_gray)
             if h is not None:
-                imgOutput_homography = wrap_and_print_homography(homography_puzzle_i[j], imgOutput_homography, height,
+                imgOutput_homography, relative = wrap_and_print_homography(homography_puzzle_i[j], imgOutput_homography, height,
                                                                  width, h)
+                save_relative_image(relative, 'homography', i+1, j+1)
                 no_matches_in_puzzle = -1
                 nMatches = nMatches + 1
                 matches_list.append(j)
@@ -381,6 +386,7 @@ for i in range(0, len(all_homography_puzzle)):
             break
 
     num_of_piece_for_each_homography_puzzle.append((i + 1, nMatches))
+    save_solution_image(imgOutput_affine,'homography', i, nMatches, len(homography_puzzle_i))
 
     figs = plt.figure(figsize=(8, 8))
     plt.imshow(imgOutput_homography)
