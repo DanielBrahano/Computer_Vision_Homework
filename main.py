@@ -127,7 +127,7 @@ def is_nice_homography(H):
     return True
 
 
-def apply_ransac_homography(img1, img2, iterations=10000, e=5, threshold=0.8, min_matches=30):
+def run_ransac_homography(img1, img2, iterations=10000, e=4, threshold=0.8, min_matches=35):
     kp1, desc1 = get_sift_detector_descriptor(img1)
     kp2, desc2 = get_sift_detector_descriptor(img2)
 
@@ -161,6 +161,7 @@ def apply_ransac_homography(img1, img2, iterations=10000, e=5, threshold=0.8, mi
         homography_matrix = cv2.getPerspectiveTransform(rnd_pairs1,
                                                         rnd_pairs2)
 
+        is_correct_homography = True
         is_correct_homography = is_nice_homography(homography_matrix)
         if is_correct_homography:
             predicted_src_points = myPerspectiveTransform(homography_matrix, src_pts)
@@ -177,31 +178,7 @@ def apply_ransac_homography(img1, img2, iterations=10000, e=5, threshold=0.8, mi
     return out_homography_matrix
 
 
-def test_if_match(img1, img2):
-    # img1 = cv2.cvtColor(img1_color, cv2.COLOR_BGR2GRAY)
-
-    # img2 = cv2.cvtColor(img2_color, cv2.COLOR_BGR2GRAY)
-
-    # get keypoints and descriptors
-    sift = cv2.SIFT_create()
-    kp1, desc1 = get_sift_detector_descriptor(img1)
-    kp2, desc2 = get_sift_detector_descriptor(img2)
-
-    #
-
-    # get the distance MXN matrix between every descriptors pair
-    distanceOfDescriptors = compute_euclidean_distance(desc1, desc2)
-    if distanceOfDescriptors is None:
-        return None
-    # find matches with ratio test
-    matches = sift_ratio_match(0.8, distanceOfDescriptors)
-
-    if matches is None:
-        return None
-    return 1
-
-
-def apply_ransac_affine(img1, img2, iterations=10000, e=5, threshold=0.8, min_matches=30):
+def run_ransac_affine(img1, img2, iterations=10000, e=4, threshold=0.8, min_matches=35):
     # get keypoints and descriptors
     kp1, desc1 = get_sift_detector_descriptor(img1)
     kp2, desc2 = get_sift_detector_descriptor(img2)
@@ -258,7 +235,7 @@ def apply_ransac_affine(img1, img2, iterations=10000, e=5, threshold=0.8, min_ma
     return out_affine_matrix
 
 
-def wrap_and_print_affine(img1, img2, height, width, transformation_matrix):
+def wrap_affine(img1, img2, height, width, transformation_matrix):
     img_output = cv2.warpAffine(img1, transformation_matrix, (width, height), flags=cv2.INTER_CUBIC)
     relative = img_output.copy()
     grayImg = cv2.cvtColor(img_output, cv2.COLOR_BGR2GRAY)
@@ -269,15 +246,15 @@ def wrap_and_print_affine(img1, img2, height, width, transformation_matrix):
     return img_output, relative
 
 
-def wrap_and_print_homography(img1, img2, height, width, transformation_matrix):
+def wrap_homography(img1, img2, height, width, transformation_matrix):
     img_output = cv2.warpPerspective(img1, transformation_matrix, (width, height), flags=cv2.INTER_CUBIC)
     relative = img_output.copy()
     grayImg = cv2.cvtColor(img_output, cv2.COLOR_BGR2GRAY)
-    for i in range(img1.shape[0]):
+    for i in range(img2.shape[0]):
         for j in range(img2.shape[1]):
             if grayImg[i][j] == 0:
                 img_output[i][j] = img2[i][j]
-    #save relative image
+    # save relative image
     return img_output, relative
 
 
@@ -285,8 +262,17 @@ def wrap_and_print_homography(img1, img2, height, width, transformation_matrix):
 all_affine_puzzle = get_affine_images_and_all_info()
 num_of_piece_for_each_affine_puzzle = []
 
-for i in range(len(all_affine_puzzle)):
-#for i in range(7, 9):
+# for i in range(len(all_affine_puzzle)):
+for i in range(7, 10):
+
+    if i == 7:
+        minimum_matches=8
+    elif i == 8:
+        minimum_matches = 17
+    else:
+        minimum_matches = 35
+
+
     affine_puzzle_i, height, width, final_warp_mat = all_affine_puzzle[i]
     # how many iterations have been with no matches
     no_matches_in_puzzle = 0
@@ -303,15 +289,10 @@ for i in range(len(all_affine_puzzle)):
             # convert to gray scale
             affine_puzzle_i_j_gray = cv2.cvtColor(affine_puzzle_i[j], cv2.COLOR_BGR2GRAY)
             imgOutput_affine_gray = cv2.cvtColor(imgOutput_affine, cv2.COLOR_BGR2GRAY)
-            if j == 7:
-                h = apply_ransac_affine(affine_puzzle_i_j_gray, imgOutput_affine_gray, min_matches=8)
-            elif j == 8:
-                h = apply_ransac_affine(affine_puzzle_i_j_gray, imgOutput_affine_gray, min_matches=17)
-            else:
-                h = apply_ransac_affine(affine_puzzle_i_j_gray, imgOutput_affine_gray)
+            h = run_ransac_affine(affine_puzzle_i_j_gray, imgOutput_affine_gray, min_matches=minimum_matches)
             if h is not None:
-                imgOutput_affine, relative = wrap_and_print_affine(affine_puzzle_i[j], imgOutput_affine, height, width, h)
-                save_relative_image(relative, 'homography', i+1, j+1)
+                imgOutput_affine, relative = wrap_affine(affine_puzzle_i[j], imgOutput_affine, height, width, h)
+                save_relative_image(relative, 'homography', i + 1, j + 1)
                 nMatches = nMatches + 1
                 matches_list.append(j)
                 no_matches_in_puzzle = -1
@@ -330,7 +311,7 @@ for i in range(len(all_affine_puzzle)):
             break
 
     num_of_piece_for_each_affine_puzzle.append((i + 1, nMatches))
-    save_solution_image(imgOutput_affine,'affine',i,nMatches,len(affine_puzzle_i))
+    save_solution_image(imgOutput_affine, 'affine', i+1, nMatches, len(affine_puzzle_i))
 
     figs = plt.figure(figsize=(8, 8))
     plt.imshow(imgOutput_affine)
@@ -339,8 +320,15 @@ all_homography_puzzle = get_homography_images_and_all_info()
 num_of_piece_for_each_homography_puzzle = []
 
 # loop over all homography puzzles and assemble
-#for i in range(10, 10):
+# for i in range(10, 10):
 for i in range(0, len(all_homography_puzzle)):
+#for i in range(0, 2):
+
+    if i == 5 or i == 6 or i == 7:
+        minimum_matches=10
+    else:
+        minimum_matches=35
+
     homography_puzzle_i, height, width, final_warp_mat = all_homography_puzzle[i]
 
     # how many iterations have been with no matches
@@ -359,14 +347,12 @@ for i in range(0, len(all_homography_puzzle)):
             # convert to gray scale
             homography_puzzle_i_j_gray = cv2.cvtColor(homography_puzzle_i[j], cv2.COLOR_BGR2GRAY)
             imgOutput_homography_gray = cv2.cvtColor(imgOutput_homography, cv2.COLOR_BGR2GRAY)
-            if j == 5 or j == 6 or j == 7:
-                h = apply_ransac_homography(homography_puzzle_i_j_gray, imgOutput_homography_gray, min_matches=10)
-            else:
-                h = apply_ransac_homography(homography_puzzle_i_j_gray, imgOutput_homography_gray)
+            h = run_ransac_homography(homography_puzzle_i_j_gray, imgOutput_homography_gray,
+                                      min_matches=minimum_matches)
             if h is not None:
-                imgOutput_homography, relative = wrap_and_print_homography(homography_puzzle_i[j], imgOutput_homography, height,
+                imgOutput_homography, relative = wrap_homography(homography_puzzle_i[j], imgOutput_homography, height,
                                                                  width, h)
-                save_relative_image(relative, 'homography', i+1, j+1)
+                #save_relative_image(relative, 'homography', i + 1, j + 1)
                 no_matches_in_puzzle = -1
                 nMatches = nMatches + 1
                 matches_list.append(j)
@@ -386,7 +372,7 @@ for i in range(0, len(all_homography_puzzle)):
             break
 
     num_of_piece_for_each_homography_puzzle.append((i + 1, nMatches))
-    save_solution_image(imgOutput_affine,'homography', i, nMatches, len(homography_puzzle_i))
+    #save_solution_image(imgOutput_homography, 'homography', i+1, nMatches, len(homography_puzzle_i))
 
     figs = plt.figure(figsize=(8, 8))
     plt.imshow(imgOutput_homography)
