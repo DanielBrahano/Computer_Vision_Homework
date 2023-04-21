@@ -41,10 +41,9 @@ num_of_pieces_in_puzzle_homography = np.array([4, 5, 6, 12, 16, 21, 24, 34, 35, 
 
 
 def get_affine_images():
-    '''
-
+    """
     :return: all_affine_images: array which each entry is array of piece for a puzzle
-    '''
+    """
     all_affine_images = []
     num_of_pieces_in_puzzle_affine = np.array([2, 5, 8, 11, 14, 25, 38, 36, 57, 62])
     for i in range(len(num_of_pieces_in_puzzle_affine)):
@@ -59,36 +58,31 @@ def get_affine_images():
 
 
 def get_homography_warp_matrix(homography_mat_path):
-    '''
-    get homography matrix
+    """
+    Get homography matrix.
     :param homography_mat_path: path to txt file representing matrix
     :return: matrix: homography matrix
-    '''
-    # Read the text file
+    """
     with open(homography_mat_path, 'r') as f:
         lines = f.readlines()
 
-    # Parse the lines to create a list of lists
     matrix = []
     for line in lines:
         row = [float(x) for x in line.split()]
         matrix.append(row)
 
-    # Convert the list of lists to a NumPy array
     matrix = np.array(matrix)
-
-    # Print the resulting matrix
     #print(matrix)
 
     return matrix
 
 
 def get_affine_warp_matrix(affine_mat_path):
-    '''
-    get homography matrix
+    """
+    Get homography matrix.
     :param mat_path: path to txt file representing matrix
     :return: matrix: affine matrix
-    '''
+    """
     # Read the text file
     with open(affine_mat_path, 'r') as f:
         lines = f.readlines()
@@ -108,11 +102,11 @@ def get_affine_warp_matrix(affine_mat_path):
 
 
 def get_height_width(mat_path):
-    '''
-    get height and width of final puzzle
+    """
+    Get height and width of final puzzle.
     :param mat_path: path to txt file representing matrix
     :return:
-    '''
+    '"""
     match = re.search(r"H_(\d+).*W_(\d+)", mat_path)
 
     if match:
@@ -127,11 +121,10 @@ def get_height_width(mat_path):
 
 
 def get_list_height_width(list_of_mat_paths):
-    '''
-
+    """
     :param list_of_mat_paths:  list of paths to matrices
     :return: list of heights and widths
-    '''
+    """
     list_height_width = []
     for mat_path in list_of_mat_paths:
         (height, width) = get_height_width(mat_path)
@@ -140,23 +133,22 @@ def get_list_height_width(list_of_mat_paths):
 
 
 def get_list_homography_matrices(list_of_mat_paths):
-    '''
-
+    """
     :param list_of_mat_paths: list of paths to matrices
     :return: list of warp affine matrices
-    '''
+    """
     list_warp_homography_matrices = []
     for mat_path in list_of_mat_paths:
         matrix = get_homography_warp_matrix(mat_path)
         list_warp_homography_matrices.append(matrix)
     return list_warp_homography_matrices
 
-def get_list_affine_matrices(list_of_mat_paths):
-    '''
 
+def get_list_affine_matrices(list_of_mat_paths):
+    """
     :param list_of_mat_paths: list of paths to matrices
     :return: list of warp affine matrices
-    '''
+    """
     list_warp_affine_matrices = []
     for mat_path in list_of_mat_paths:
         matrix = get_affine_warp_matrix(mat_path)
