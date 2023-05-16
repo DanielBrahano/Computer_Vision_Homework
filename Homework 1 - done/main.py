@@ -46,7 +46,6 @@ def sift_ratio_match(ratio_thresh, dist_matrix, min_matches):
             good_matches.append(match)
             position.append((i, idx1))
 
-    print('len matches list:', str(len(good_matches)))
     if len(good_matches) < min_matches:
         return None
 
@@ -277,10 +276,6 @@ if __name__ == "__main__":
             j = j + 1
             j = j % len(affine_puzzle_i)
             num_iterations = num_iterations + 1
-            print("num_iterations = " + str(num_iterations))
-            print('matches: ')
-            print(matches_list)
-            print("nMatches = " + str(nMatches))
             if num_iterations > len(affine_puzzle_i) ** 2:
                 break
             if no_matches_in_puzzle > 2 * len(affine_puzzle_i):
@@ -298,10 +293,6 @@ if __name__ == "__main__":
         cbar.ax.set_ylabel(ylabel='', rotation=-90, va="bottom")
 
         save_coverage_count('affine', i + 1, fig, heatmap)
-
-        figs = plt.figure(figsize=(8, 8))
-        plt.imshow(imgOutput_affine)
-        plt.show()
 
 
     ### homography puzzles ###
@@ -357,10 +348,6 @@ if __name__ == "__main__":
             j = j + 1
             j = j % len(homography_puzzle_i)
             num_iterations = num_iterations + 1
-            print("num_iterations = " + str(num_iterations))
-            print('matches: ')
-            print(matches_list)
-            print("nMatches = " + str(nMatches))
             if num_iterations > (len(homography_puzzle_i)) ** 2:
                 break
 
@@ -379,10 +366,6 @@ if __name__ == "__main__":
         cbar.ax.set_ylabel(ylabel='', rotation=-90, va="bottom")
 
         save_coverage_count('homography', i + 1, fig, heatmap)
-
-        figs = plt.figure(figsize=(8, 8))
-        plt.imshow(imgOutput_homography)
-        plt.show()
 
     print('##################### RESULTS #####################')
 
