@@ -115,14 +115,61 @@ def apply_census_transform(input_image_l: np.ndarray, input_image_r: np.ndarray,
     return left_census_values, right_census_values
 
 
-def stereo_algorithm(left_image, right_image, max_disparity, window_size=3):
-    path1 = 'data/example/im_left.jpg'
-    path2 = 'data/example/im_right.jpg'
+"""------------------------------LEFT-RIGHT CONSISTENCY TEST---------------------------------
+"""
 
-    # Load images
-    im_left = cv2.imread(path1)
-    im_right = cv2.imread(path2)
 
+def left_right_consistency_test(disp_map_left, disp_map_right, threshold=1.0):
+    # Initialize two empty consistency maps
+    height, width = disp_map_left.shape
+    consistency_map_left = np.zeros((height, width), dtype=np.float32)
+    consistency_map_right = np.zeros((height, width), dtype=np.float32)
+
+    for y in range(height):
+        for x in range(width):
+            # Check for out of bounds
+            if x - int(disp_map_left[y, x]) < 0 or x + int(disp_map_right[y, x]) >= width:
+                continue
+            # Perform the consistency check for the left disparity map
+            if abs(disp_map_left[y, x] - disp_map_right[y, x - int(disp_map_left[y, x])]) > threshold:
+                consistency_map_left[y, x] = 1.0  # Mark as inconsistent in the left consistency map
+            # Perform the consistency check for the right disparity map
+            if abs(disp_map_right[y, x] - disp_map_left[y, x + int(disp_map_right[y, x])]) > threshold:
+                consistency_map_right[y, x] = 1.0  # Mark as inconsistent in the right consistency map
+
+    # Fix disparity maps by ignoring outliers
+    fixed_disp_map_left = np.where(consistency_map_left == 0, disp_map_left, 0)
+    fixed_disp_map_right = np.where(consistency_map_right == 0, disp_map_right, 0)
+
+    return fixed_disp_map_left, fixed_disp_map_right
+
+
+'''
+------------------------------COST AGGREGATION--------------------------------------------
+'''
+
+
+def cost_aggregation(cost_volume_left, cost_volume_right, kernel_size=5, sigma=1.5):
+    # Apply Gaussian blur for local aggregation
+    cost_volume_left_agg = cv2.GaussianBlur(cost_volume_left, (kernel_size, kernel_size), sigma)
+    cost_volume_right_agg = cv2.GaussianBlur(cost_volume_right, (kernel_size, kernel_size), sigma)
+
+    #cost_volume_left_agg = cv2.medianBlur(cost_volume_left, kernel_size)
+    #cost_volume_right_agg = cv2.medianBlur(cost_volume_right, kernel_size)
+    return cost_volume_left_agg, cost_volume_right_agg
+
+
+def calculate_depth(disparity_map, baseline_dist, focal_length):
+    # Create a mask to handle zeros in the disparity map
+    mask = (disparity_map != 0)
+
+    # Calculate depth values with the zero check
+    depth_map = np.zeros_like(disparity_map, dtype=np.float32)
+    depth_map[mask] = (focal_length * baseline_dist) / disparity_map[mask]
+    return depth_map
+
+
+def stereo_algorithm(im_left, im_right, max_disparity, window_size=3):
     # Convert the color images to grayscale
     gray_left = cv2.cvtColor(im_left, cv2.COLOR_BGR2GRAY)
     gray_right = cv2.cvtColor(im_right, cv2.COLOR_BGR2GRAY)
@@ -131,39 +178,64 @@ def stereo_algorithm(left_image, right_image, max_disparity, window_size=3):
 
     cost_left, cost_right = calculate_volume_cost(gray_left, gray_right, max_disparity, window_size)
 
+    cost_left, cost_right = cost_aggregation(cost_left, cost_right)
+
+    # Winner takes all
     disp_map_left = np.argmin(cost_left, axis=2)
     disp_map_right = np.argmin(cost_right, axis=2)
 
+    disp_map_left, disp_map_right = left_right_consistency_test(disp_map_left, disp_map_right)
+
     return disp_map_left, disp_map_right
+
+
 if __name__ == '__main__':
 
-    from os.path import splitext
-    import matplotlib.pyplot as plt
-
     print('\nLoad images...')
-    #img_l = load_img_file('../../examples/data/cones/im_left.jpg')
-    #img_r = load_img_file('../../examples/data/cones/im_right.jpg')
 
-    img_l = cv2.imread('data/example/im_left.jpg')
-    img_r = cv2.imread('data/example/im_right.jpg')
+    img_l = cv2.imread('data/set_1/im_left.jpg')
+    img_r = cv2.imread('data/set_1/im_right.jpg')
     dawn = t.time()
 
-    l_disparity_map, r_disparity_map  = stereo_algorithm(img_l, img_r, 77, 3)
+    l_disparity_map, r_disparity_map = stereo_algorithm(img_l, img_r, 134, 3)
 
+    np.save('data/set_1/disp_left.npy', l_disparity_map)
+    np.save('data/set_1/disp_right.npy', r_disparity_map)
 
+    l_disparity_map = np.load('data/set_1/disp_left.npy')
+    r_disparity_map = np.load('data/set_1/disp_right.npy')
+
+    base_path = 'data/set_1/'
+
+    intrinsics = np.loadtxt(base_path + "K.txt")
+    depth_left = calculate_depth(l_disparity_map, 10, intrinsics[0][0])
+    depth_right = calculate_depth(r_disparity_map, 10, intrinsics[0][0])
+
+    depth_left = depth_left/np.max(depth_left)*255
+    depth_right = depth_right/np.max(depth_right)*255
     dusk = t.time()
     print('\nTotal execution time = {:.2f}s'.format(dusk - dawn))
 
-    fig, axs = plt.subplots(1, 2, figsize=(10, 5))  # Create a figure with 1 row and 2 columns of subplots
+    fig, axs = plt.subplots(2, 2, figsize=(10, 5))  # Create a figure with 1 row and 2 columns of subplots
 
     # Show img1 in the first subplot
-    axs[0].imshow(l_disparity_map, cmap='gray')  # Use cmap='gray' for grayscale images
-    axs[0].axis('off')  # Hide the axes on this subplot
-    axs[0].set_title('Image 1')  # Set title for first image
+    axs[0, 0].imshow(l_disparity_map, cmap='gray')  # Use cmap='gray' for grayscale images
+    axs[0, 0].axis('off')  # Hide the axes on this subplot
+    axs[0, 0].set_title('disp Image l')  # Set title for first image
 
     # Show img2 in the second subplot
-    axs[1].imshow(r_disparity_map, cmap='gray')  # Use cmap='gray' for grayscale images
-    axs[1].axis('off')  # Hide the axes on this subplot
-    axs[1].set_title('Image 2')  # Set title for second image
+    axs[0, 1].imshow(r_disparity_map, cmap='gray')  # Use cmap='gray' for grayscale images
+    axs[0, 1].axis('off')  # Hide the axes on this subplot
+    axs[0, 1].set_title('disp Image r')  # Set title for second image
+
+    # Show img1 in the first subplot
+    axs[1, 0].imshow(depth_left, cmap='gray')  # Use cmap='gray' for grayscale images
+    axs[1, 0].axis('off')  # Hide the axes on this subplot
+    axs[1, 0].set_title('depth_left')  # Set title for first image
+
+    # Show img2 in the second subplot
+    axs[1, 1].imshow(depth_right, cmap='gray')  # Use cmap='gray' for grayscale images
+    axs[1, 1].axis('off')  # Hide the axes on this subplot
+    axs[1, 1].set_title('depth_right')  # Set title for second image
 
     plt.show()  # Display the figure with the images
