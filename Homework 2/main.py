@@ -10,18 +10,19 @@ from matplotlib import pyplot as plt
 '''
 
 
-def hamming_distance(ch1, ch2):
-    return bin(ch1 ^ ch2).count('1')
+def hamming_distance(arr1, arr2):
+    return np.sum(arr1 != arr2)
 
 
 def calculate_volume_cost(
         census_image_left: np.ndarray,
         census_image_right: np.ndarray,
         max_disparity: int,
-        window_size: int = 3
+        height=3,
+        width=3
 ) -> (np.ndarray, np.ndarray):
     # Padding the images
-    padding = max_disparity + window_size // 2
+    padding = max_disparity + max(height, width) // 2
     census_image_left = np.pad(census_image_left, padding, mode='constant')
     census_image_right = np.pad(census_image_right, padding, mode='constant')
 
@@ -78,8 +79,12 @@ def calculate_census(input_block: np.ndarray = None) -> int:
     return census_num
 
 
-def apply_census_transform(input_image_l: np.ndarray, input_image_r: np.ndarray, kernel_size: int) -> (
-        np.ndarray, np.ndarray):
+def calculate_census(block):
+    center_value = block[len(block) // 2, len(block[0]) // 2]
+    return block < center_value
+
+
+def apply_census_transform(input_image_l: np.ndarray, input_image_r: np.ndarray, h, w) -> (np.ndarray, np.ndarray):
     """ Census feature extraction. """
 
     height, width = input_image_l.shape
@@ -88,24 +93,24 @@ def apply_census_transform(input_image_l: np.ndarray, input_image_r: np.ndarray,
     input_image_l = normalize_data(input_image_l.astype(float))
     input_image_r = normalize_data(input_image_r.astype(float))
 
-    left_census_values = np.zeros(shape=(height, width), dtype=np.uint64)
-    right_census_values = np.zeros(shape=(height, width), dtype=np.uint64)
+    left_census_values = np.empty(shape=(height, width), dtype=object)
+    right_census_values = np.empty(shape=(height, width), dtype=object)
 
     print('\tComputing left and right census...', end='')
     start_time = t.time()
 
     # Exclude pixels on the border (they will have no census values)
-    for y in range(kernel_size, height - kernel_size):
-        for x in range(kernel_size, width - kernel_size):
+    for y in range(h, height - h):
+        for x in range(w, width - w):
             # extract block region from left image and compute its census value
             block_l = np.subtract(
-                input_image_l[y - kernel_size:y + kernel_size + 1, x - kernel_size:x + kernel_size + 1],
+                input_image_l[y - h:y + h + 1, x - w:x + w + 1],
                 input_image_l[y, x], dtype=np.float64)
             left_census_values[y, x] = calculate_census(block_l)
 
             # extract block region from right image and compute its census value
             block_r = np.subtract(
-                input_image_r[y - kernel_size:y + kernel_size + 1, x - kernel_size:x + kernel_size + 1],
+                input_image_r[y - h:y + h + 1, x - w:x + w + 1],
                 input_image_r[y, x], dtype=np.float64)
             right_census_values[y, x] = calculate_census(block_r)
 
@@ -119,7 +124,7 @@ def apply_census_transform(input_image_l: np.ndarray, input_image_r: np.ndarray,
 """
 
 
-def left_right_consistency_test(disp_map_left, disp_map_right, threshold=1.0):
+def left_right_consistency_test(disp_map_left, disp_map_right, threshold=0):
     # Initialize two empty consistency maps
     height, width = disp_map_left.shape
     consistency_map_left = np.zeros((height, width), dtype=np.float32)
@@ -149,13 +154,13 @@ def left_right_consistency_test(disp_map_left, disp_map_right, threshold=1.0):
 '''
 
 
-def cost_aggregation(cost_volume_left, cost_volume_right, kernel_size=5, sigma=1.5):
+def cost_aggregation(cost_volume_left, cost_volume_right, kernel_size=15, sigma=1.5):
     # Apply Gaussian blur for local aggregation
-    cost_volume_left_agg = cv2.GaussianBlur(cost_volume_left, (kernel_size, kernel_size), sigma)
-    cost_volume_right_agg = cv2.GaussianBlur(cost_volume_right, (kernel_size, kernel_size), sigma)
+    cost_volume_left_agg = cv2.GaussianBlur(cost_volume_left, (kernel_size, kernel_size), 0)
+    cost_volume_right_agg = cv2.GaussianBlur(cost_volume_right, (kernel_size, kernel_size), 0)
 
-    #cost_volume_left_agg = cv2.medianBlur(cost_volume_left, kernel_size)
-    #cost_volume_right_agg = cv2.medianBlur(cost_volume_right, kernel_size)
+    # cost_volume_left_agg = cv2.medianBlur(cost_volume_left, kernel_size)
+    # cost_volume_right_agg = cv2.medianBlur(cost_volume_right, kernel_size)
     return cost_volume_left_agg, cost_volume_right_agg
 
 
@@ -169,14 +174,24 @@ def calculate_depth(disparity_map, baseline_dist, focal_length):
     return depth_map
 
 
-def stereo_algorithm(im_left, im_right, max_disparity, window_size=3):
+def calculate_depth(disparity_map, baseline_dist, focal_length):
+    # Create a mask to handle zeros in the disparity map
+    mask = (disparity_map > 10)
+
+    # Calculate depth values with the zero check
+    depth_map = np.zeros_like(disparity_map, dtype=np.float32)
+    depth_map[mask] = (focal_length * baseline_dist) / disparity_map[mask]
+    return depth_map
+
+
+def stereo_algorithm(im_left, im_right, max_disparity, height, width):
     # Convert the color images to grayscale
     gray_left = cv2.cvtColor(im_left, cv2.COLOR_BGR2GRAY)
     gray_right = cv2.cvtColor(im_right, cv2.COLOR_BGR2GRAY)
 
-    gray_left, gray_right = apply_census_transform(gray_left, gray_right, window_size)
+    gray_left, gray_right = apply_census_transform(gray_left, gray_right, height, width)
 
-    cost_left, cost_right = calculate_volume_cost(gray_left, gray_right, max_disparity, window_size)
+    cost_left, cost_right = calculate_volume_cost(gray_left, gray_right, max_disparity, height, width)
 
     cost_left, cost_right = cost_aggregation(cost_left, cost_right)
 
@@ -190,29 +205,33 @@ def stereo_algorithm(im_left, im_right, max_disparity, window_size=3):
 
 
 if __name__ == '__main__':
-
     print('\nLoad images...')
 
     img_l = cv2.imread('data/set_1/im_left.jpg')
     img_r = cv2.imread('data/set_1/im_right.jpg')
     dawn = t.time()
 
-    l_disparity_map, r_disparity_map = stereo_algorithm(img_l, img_r, 134, 3)
+    l_disparity_map, r_disparity_map = stereo_algorithm(img_l, img_r, 134, 13, 25)
 
-    np.save('data/set_1/disp_left.npy', l_disparity_map)
+    np.save('data//disp_left.npy', l_disparity_map)
     np.save('data/set_1/disp_right.npy', r_disparity_map)
 
     l_disparity_map = np.load('data/set_1/disp_left.npy')
     r_disparity_map = np.load('data/set_1/disp_right.npy')
 
-    base_path = 'data/set_1/'
+    # l_disparity_map = cv2.cvtColor(cv2.imread('data/example/disp_left.jpg'), cv2.COLOR_BGR2GRAY)
+    # r_disparity_map = cv2.cvtColor(cv2.imread('data/example/disp_right.jpg'), cv2.COLOR_BGR2GRAY)
+
+    # base_path = 'data/set_1/'
+
+    base_path = 'data/example/'
 
     intrinsics = np.loadtxt(base_path + "K.txt")
-    depth_left = calculate_depth(l_disparity_map, 10, intrinsics[0][0])
+    depth_left = calculate_depth(l_disparity_map, 0.1, intrinsics[0][0])
     depth_right = calculate_depth(r_disparity_map, 10, intrinsics[0][0])
 
-    depth_left = depth_left/np.max(depth_left)*255
-    depth_right = depth_right/np.max(depth_right)*255
+    depth_left = depth_left / np.max(depth_left) * 255
+    depth_right = depth_right / np.max(depth_right) * 255
     dusk = t.time()
     print('\nTotal execution time = {:.2f}s'.format(dusk - dawn))
 
