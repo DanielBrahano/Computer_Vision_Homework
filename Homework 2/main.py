@@ -204,6 +204,58 @@ def stereo_algorithm(im_left, im_right, max_disparity, height, width):
     return disp_map_left, disp_map_right
 
 
+# TODO: Hana added
+def reproject_points(disparity_map, baseline_dist, focal_length, intrinsics):
+    """Reproject the image coordinates into 3D space."""
+    depth_map = calculate_depth(disparity_map, baseline_dist, focal_length)
+    height, width = disparity_map.shape
+    points_3d = np.zeros((height, width, 3), dtype=np.float32)
+
+    # TODO: Hana: I am not sure if we need to inverse or if K is already inverse.
+    K_inv = np.linalg.inv(intrinsics)
+
+    for y in range(height):
+        for x in range(width):
+            depth = depth_map[y, x]
+            homogeneous_coords = np.array([x, y, 1])
+            camera_coords = depth * np.dot(K_inv, homogeneous_coords)
+            points_3d[y, x] = camera_coords
+
+    return points_3d
+
+def project_points(points_3d, intrinsics):
+    """Return the reprojected points to the original camera plane."""
+
+    # TODO: Hana: I am not sure if we need to inverse or if K is already inverse.
+    K_inv = np.linalg.inv(intrinsics)
+
+    height, width, _ = points_3d.shape
+    points_3d_reshaped = points_3d.reshape((height * width, 3)).T
+
+    points_2d_homogeneous = K_inv.dot(points_3d_reshaped)
+    points_2d = (points_2d_homogeneous / points_2d_homogeneous[2]).T
+    points_2d = points_2d[:, :2].reshape((height, width, 2))
+
+    return points_2d
+
+def synthesize_image(reprojected_points, original_image):
+    """Synthesize the reprojected image."""
+    reprojected_points = np.round(reprojected_points).astype(int)
+
+    height, width = original_image.shape[:2]
+
+    mask = (reprojected_points[:, :, 0] >= 0) & (reprojected_points[:, :, 0] < width) & \
+           (reprojected_points[:, :, 1] >= 0) & (reprojected_points[:, :, 1] < height)
+
+    reprojected_image = np.zeros_like(original_image)
+
+    reprojected_image[mask, 0] = original_image[reprojected_points[mask, 1], reprojected_points[mask, 0], 0]
+    reprojected_image[mask, 1] = original_image[reprojected_points[mask, 1], reprojected_points[mask, 0], 1]
+    reprojected_image[mask, 2] = original_image[reprojected_points[mask, 1], reprojected_points[mask, 0], 2]
+
+    return reprojected_image
+
+
 if __name__ == '__main__':
     print('\nLoad images...')
 
@@ -258,3 +310,26 @@ if __name__ == '__main__':
     axs[1, 1].set_title('depth_right')  # Set title for second image
 
     plt.show()  # Display the figure with the images
+
+
+
+
+    # TODO: Hana added
+    # reproject left image coordinates into 3D.
+    baseline_distance = 10
+    focal_length = intrinsics[0][0]
+    points_3d = reproject_points(l_disparity_map, baseline_distance, focal_length, intrinsics)
+    # return the reprojected points to the original camera plane.
+    reprojected_points = project_points(points_3d, intrinsics)
+    # synthesize.
+    reprojected_image = synthesize_image(reprojected_points, img_l)
+
+    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+    axs[0].imshow(cv2.cvtColor(img_l, cv2.COLOR_BGR2RGB))
+    axs[0].axis('off')
+    axs[0].set_title('Original Left Image')
+    axs[1].imshow(cv2.cvtColor(reprojected_image, cv2.COLOR_BGR2RGB))
+    axs[1].axis('off')
+    axs[1].set_title('Reprojected Image')
+    plt.tight_layout()
+    plt.show()
