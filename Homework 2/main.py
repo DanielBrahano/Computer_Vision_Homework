@@ -1,15 +1,15 @@
 import sys
 import time as t
-
+import os
 import cv2
 import numpy as np
 from matplotlib import pyplot as plt
+from load_and_save_data import *
+
 
 '''
 ---------------------------------COST VOLUME CALCULATION---------------------------------------
 '''
-
-
 def hamming_distance(arr1, arr2):
     return np.sum(arr1 != arr2)
 
@@ -163,7 +163,9 @@ def cost_aggregation(cost_volume_left, cost_volume_right, kernel_size=15, sigma=
     # cost_volume_right_agg = cv2.medianBlur(cost_volume_right, kernel_size)
     return cost_volume_left_agg, cost_volume_right_agg
 
-
+'''
+------------------------------CALCULATE DEPTH--------------------------------------------
+'''
 def calculate_depth(disparity_map, baseline_dist, focal_length):
     # Create a mask to handle zeros in the disparity map
     mask = (disparity_map != 0)
@@ -173,17 +175,9 @@ def calculate_depth(disparity_map, baseline_dist, focal_length):
     depth_map[mask] = (focal_length * baseline_dist) / disparity_map[mask]
     return depth_map
 
-
-def calculate_depth(disparity_map, baseline_dist, focal_length):
-    # Create a mask to handle zeros in the disparity map
-    mask = (disparity_map != 0)
-
-    # Calculate depth values with the zero check
-    depth_map = np.zeros_like(disparity_map, dtype=np.float32)
-    depth_map[mask] = (focal_length * baseline_dist) / disparity_map[mask]
-    return depth_map
-
-
+'''
+-----------------------------GET DISPARITY--------------------------------------------
+'''
 def stereo_algorithm(im_left, im_right, max_disparity, height, width):
     # Convert the color images to grayscale
     gray_left = cv2.cvtColor(im_left, cv2.COLOR_BGR2GRAY)
@@ -223,6 +217,7 @@ def reproject_points(disparity_map, baseline_dist, focal_length, intrinsics):
 
     return points_3d
 
+
 def project_points(points_3d, intrinsics):
     """Return the reprojected points to the original camera plane."""
 
@@ -237,6 +232,7 @@ def project_points(points_3d, intrinsics):
     points_2d = points_2d[:, :2].reshape((height, width, 2))
 
     return points_2d
+
 
 def synthesize_image(reprojected_points, original_image):
     """Synthesize the reprojected image."""
@@ -280,6 +276,7 @@ def reproject_to_3d(image, depth_map, intrinsic_matrix):
 
     return points_3d
 
+
 def reproject_to_2d(points_3d, intrinsic_matrix, original_image):
     # Initialize an empty array to store the reprojected 2D image
     reprojected_image = np.zeros_like(original_image)
@@ -311,12 +308,15 @@ def reproject_to_2d(points_3d, intrinsic_matrix, original_image):
     return reprojected_image
 
 
-def simulate_camera_positions(image, depth_map, intrinsic_matrix, baseline=10, num_positions=11):
+def simulate_camera_positions(image, depth_map, intrinsic_matrix, baseline=10, num_positions=11, set_num=0):
     # Convert baseline from cm to meters
     baseline /= 100.0
 
     # Create an array of camera positions along the baseline
     camera_positions = np.linspace(0, baseline, num_positions)
+
+    # Define target directory
+    target_dir = f"results/set_{set_num}"
 
     # For each camera position...
     for i, t in enumerate(camera_positions):
@@ -330,105 +330,29 @@ def simulate_camera_positions(image, depth_map, intrinsic_matrix, baseline=10, n
         points_3d[:, :, 0] -= translation_vector[0]
 
         # Reproject the translated 3D points back to 2D
-        reprojected_image = reproject_to_2d(points_3d, intrinsic_matrix, image)
+        reproject_image = reproject_to_2d(points_3d, intrinsic_matrix, image)
 
-        # Plot the reprojected image
-        plt.figure()
-        plt.imshow(cv2.cvtColor(reprojected_image, cv2.COLOR_BGR2RGB))  # Change color channel ordering to RGB
-        plt.title(f"Camera position: {t * 100:.1f} cm")
-    plt.show()
+        # Save the reprojected image to the specified location
+        cv2.imwrite(os.path.join(target_dir, "synth_"+str(i+1)+".jpg"), reproject_image)
 
 
 if __name__ == '__main__':
-    print('\nLoad images...')
 
-    img_l = cv2.imread('data/set_1/im_left.jpg')
-    img_r = cv2.imread('data/set_1/im_right.jpg')
-    dawn = t.time()
+    data = load_data()
+    height_census_window = 13
+    width_census_window = 25
 
-    img_l_example = cv2.imread('data/example/im_left.jpg')
-    img_r_example = cv2.imread('data/example/im_right.jpg')
+    for i, (img_left, img_right, intrinsic_matrix, max_disparity) in enumerate(data, 1):
+        print(f"Working on set {i}...")
+        left_disparity_map, right_disparity_map = stereo_algorithm(img_left, img_right, max_disparity,
+                                                                   height_census_window,
+                                                                   width_census_window)
+        left_depth_map = calculate_depth(left_disparity_map, 0.1, intrinsic_matrix[0][0])
+        right_depth_map = calculate_depth(right_disparity_map, 10, intrinsic_matrix[0][0])
 
-    #l_disparity_map, r_disparity_map = stereo_algorithm(img_l, img_r, 134, 13, 25)
+        save_results(i, left_disparity_map, right_disparity_map, left_depth_map, right_depth_map)
 
-    #np.save('data//disp_left.npy', l_disparity_map)
-    #np.save('data/set_1/disp_right.npy', r_disparity_map)
+        simulate_camera_positions(img_left, left_depth_map, intrinsic_matrix, set_num=i)
 
-    l_disparity_map = np.load('data/set_1/disp_left.npy')
-    r_disparity_map = np.load('data/set_1/disp_right.npy')
+    print("Done")
 
-    #l_disparity_map = cv2.cvtColor(cv2.imread('data/example/disp_left.jpg'), cv2.COLOR_BGR2GRAY)
-    #r_disparity_map = cv2.cvtColor(cv2.imread('data/example/disp_right.jpg'), cv2.COLOR_BGR2GRAY)
-
-    base_path_set1 = 'data/set_1/'
-    base_path_example = 'data/example/'
-
-    intrinsics_example = np.loadtxt(base_path_example + "K.txt")
-
-    intrinsics_set1 = np.loadtxt(base_path_set1 + "K.txt")
-    depth_left = calculate_depth(l_disparity_map, 0.1, intrinsics_set1[0][0])
-    depth_right = calculate_depth(r_disparity_map, 10, intrinsics_set1[0][0])
-
-    dusk = t.time()
-    print('\nTotal execution time = {:.2f}s'.format(dusk - dawn))
-
-    fig, axs = plt.subplots(2, 2, figsize=(10, 5))  # Create a figure with 1 row and 2 columns of subplots
-
-    # Show img1 in the first subplot
-    axs[0, 0].imshow(l_disparity_map, cmap='gray')  # Use cmap='gray' for grayscale images
-    axs[0, 0].axis('off')  # Hide the axes on this subplot
-    axs[0, 0].set_title('disp Image l')  # Set title for first image
-
-    # Show img2 in the second subplot
-    axs[0, 1].imshow(r_disparity_map, cmap='gray')  # Use cmap='gray' for grayscale images
-    axs[0, 1].axis('off')  # Hide the axes on this subplot
-    axs[0, 1].set_title('disp Image r')  # Set title for second image
-
-    # Show img1 in the first subplot
-    axs[1, 0].imshow(depth_left, cmap='gray')  # Use cmap='gray' for grayscale images
-    axs[1, 0].axis('off')  # Hide the axes on this subplot
-    axs[1, 0].set_title('depth_left')  # Set title for first image
-
-    # Show img2 in the second subplot
-    axs[1, 1].imshow(depth_right, cmap='gray')  # Use cmap='gray' for grayscale images
-    axs[1, 1].axis('off')  # Hide the axes on this subplot
-    axs[1, 1].set_title('depth_right')  # Set title for second image
-
-    plt.show()  # Display the figure with the images
-
-    # TODO: Daniel added
-    points_3d = reproject_to_3d(img_l, l_disparity_map, intrinsics_set1)
-    reprojected_image = reproject_to_2d(points_3d, intrinsics_set1, img_l)
-
-    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-    axs[0].imshow(cv2.cvtColor(img_l, cv2.COLOR_BGR2RGB))
-    axs[0].axis('off')
-    axs[0].set_title('Original Left Image')
-    axs[1].imshow(cv2.cvtColor(reprojected_image, cv2.COLOR_BGR2RGB))
-    axs[1].axis('off')
-    axs[1].set_title('Reprojected Image')
-    plt.tight_layout()
-    plt.show()
-
-
-    simulate_camera_positions(img_l, depth_left, intrinsics_set1)
-
-    # TODO: Hana added
-    # reproject left image coordinates into 3D.
-    baseline_distance = 10
-    focal_length = intrinsics_set1[0][0]
-    points_3d = reproject_points(l_disparity_map, baseline_distance, focal_length, intrinsics_set1)
-    # return the reprojected points to the original camera plane.
-    reprojected_points = project_points(points_3d, intrinsics_set1)
-    # synthesize.
-    reprojected_image = synthesize_image(reprojected_points, img_l)
-
-    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-    axs[0].imshow(cv2.cvtColor(img_l, cv2.COLOR_BGR2RGB))
-    axs[0].axis('off')
-    axs[0].set_title('Original Left Image')
-    axs[1].imshow(cv2.cvtColor(reprojected_image, cv2.COLOR_BGR2RGB))
-    axs[1].axis('off')
-    axs[1].set_title('Reprojected Image')
-    plt.tight_layout()
-    plt.show()
