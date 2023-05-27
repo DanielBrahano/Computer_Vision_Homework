@@ -176,7 +176,7 @@ def calculate_depth(disparity_map, baseline_dist, focal_length):
 
 def calculate_depth(disparity_map, baseline_dist, focal_length):
     # Create a mask to handle zeros in the disparity map
-    mask = (disparity_map > 10)
+    mask = (disparity_map != 0)
 
     # Calculate depth values with the zero check
     depth_map = np.zeros_like(disparity_map, dtype=np.float32)
@@ -256,6 +256,89 @@ def synthesize_image(reprojected_points, original_image):
     return reprojected_image
 
 
+def reproject_to_3d(image, depth_map, intrinsic_matrix):
+    # First, we need to invert the intrinsic matrix
+    inverted_intrinsics = np.linalg.inv(intrinsic_matrix)
+
+    # Create an empty array to store the 3D points
+    points_3d = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.float32)
+
+    # For each pixel in the image...
+    for v in range(image.shape[0]):
+        for u in range(image.shape[1]):
+            # Construct the 2D homogeneous coordinate
+            m = np.array([u, v, 1])
+
+            # Get the depth for this pixel
+            Z = depth_map[v, u]
+
+            # Compute the 3D point in the camera coordinate system
+            P = np.dot(inverted_intrinsics, m) * Z
+
+            # Store the 3D point
+            points_3d[v, u, :] = P
+
+    return points_3d
+
+def reproject_to_2d(points_3d, intrinsic_matrix, original_image):
+    # Initialize an empty array to store the reprojected 2D image
+    reprojected_image = np.zeros_like(original_image)
+
+    # Get the height and width of the image
+    height, width, _ = original_image.shape
+
+    # Iterate over the 3D points
+    for y in range(height):
+        for x in range(width):
+            # Get the 3D point
+            P = points_3d[y, x, :]
+
+            # Skip if the point is at infinity or depth is zero (not valid)
+            if P[2] == 0:
+                continue
+
+            # Project the point back to 2D
+            m = np.dot(intrinsic_matrix, P)
+
+            # Homogeneous to Cartesian coordinates
+            u, v = round(m[0] / m[2]), round(m[1] / m[2])
+
+            # Check if the reprojected point falls within the image boundaries
+            if 0 <= u < width and 0 <= v < height:
+                # Copy the pixel value from the original image
+                reprojected_image[v, u, :] = original_image[y, x, :]
+
+    return reprojected_image
+
+
+def simulate_camera_positions(image, depth_map, intrinsic_matrix, baseline=10, num_positions=11):
+    # Convert baseline from cm to meters
+    baseline /= 100.0
+
+    # Create an array of camera positions along the baseline
+    camera_positions = np.linspace(0, baseline, num_positions)
+
+    # For each camera position...
+    for i, t in enumerate(camera_positions):
+        # Create a translation vector for this camera position
+        translation_vector = np.array([t, 0, 0])
+
+        # Use your functions to reproject the image to 3D
+        points_3d = reproject_to_3d(image, depth_map, intrinsic_matrix)
+
+        # Apply translation along the x-axis to the 3D points
+        points_3d[:, :, 0] -= translation_vector[0]
+
+        # Reproject the translated 3D points back to 2D
+        reprojected_image = reproject_to_2d(points_3d, intrinsic_matrix, image)
+
+        # Plot the reprojected image
+        plt.figure()
+        plt.imshow(cv2.cvtColor(reprojected_image, cv2.COLOR_BGR2RGB))  # Change color channel ordering to RGB
+        plt.title(f"Camera position: {t * 100:.1f} cm")
+    plt.show()
+
+
 if __name__ == '__main__':
     print('\nLoad images...')
 
@@ -263,27 +346,29 @@ if __name__ == '__main__':
     img_r = cv2.imread('data/set_1/im_right.jpg')
     dawn = t.time()
 
-    l_disparity_map, r_disparity_map = stereo_algorithm(img_l, img_r, 134, 13, 25)
+    img_l_example = cv2.imread('data/example/im_left.jpg')
+    img_r_example = cv2.imread('data/example/im_right.jpg')
 
-    np.save('data//disp_left.npy', l_disparity_map)
-    np.save('data/set_1/disp_right.npy', r_disparity_map)
+    #l_disparity_map, r_disparity_map = stereo_algorithm(img_l, img_r, 134, 13, 25)
+
+    #np.save('data//disp_left.npy', l_disparity_map)
+    #np.save('data/set_1/disp_right.npy', r_disparity_map)
 
     l_disparity_map = np.load('data/set_1/disp_left.npy')
     r_disparity_map = np.load('data/set_1/disp_right.npy')
 
-    # l_disparity_map = cv2.cvtColor(cv2.imread('data/example/disp_left.jpg'), cv2.COLOR_BGR2GRAY)
-    # r_disparity_map = cv2.cvtColor(cv2.imread('data/example/disp_right.jpg'), cv2.COLOR_BGR2GRAY)
+    #l_disparity_map = cv2.cvtColor(cv2.imread('data/example/disp_left.jpg'), cv2.COLOR_BGR2GRAY)
+    #r_disparity_map = cv2.cvtColor(cv2.imread('data/example/disp_right.jpg'), cv2.COLOR_BGR2GRAY)
 
-    # base_path = 'data/set_1/'
+    base_path_set1 = 'data/set_1/'
+    base_path_example = 'data/example/'
 
-    base_path = 'data/example/'
+    intrinsics_example = np.loadtxt(base_path_example + "K.txt")
 
-    intrinsics = np.loadtxt(base_path + "K.txt")
-    depth_left = calculate_depth(l_disparity_map, 0.1, intrinsics[0][0])
-    depth_right = calculate_depth(r_disparity_map, 10, intrinsics[0][0])
+    intrinsics_set1 = np.loadtxt(base_path_set1 + "K.txt")
+    depth_left = calculate_depth(l_disparity_map, 0.1, intrinsics_set1[0][0])
+    depth_right = calculate_depth(r_disparity_map, 10, intrinsics_set1[0][0])
 
-    depth_left = depth_left / np.max(depth_left) * 255
-    depth_right = depth_right / np.max(depth_right) * 255
     dusk = t.time()
     print('\nTotal execution time = {:.2f}s'.format(dusk - dawn))
 
@@ -311,16 +396,30 @@ if __name__ == '__main__':
 
     plt.show()  # Display the figure with the images
 
+    # TODO: Daniel added
+    points_3d = reproject_to_3d(img_l, l_disparity_map, intrinsics_set1)
+    reprojected_image = reproject_to_2d(points_3d, intrinsics_set1, img_l)
+
+    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+    axs[0].imshow(cv2.cvtColor(img_l, cv2.COLOR_BGR2RGB))
+    axs[0].axis('off')
+    axs[0].set_title('Original Left Image')
+    axs[1].imshow(cv2.cvtColor(reprojected_image, cv2.COLOR_BGR2RGB))
+    axs[1].axis('off')
+    axs[1].set_title('Reprojected Image')
+    plt.tight_layout()
+    plt.show()
 
 
+    simulate_camera_positions(img_l, depth_left, intrinsics_set1)
 
     # TODO: Hana added
     # reproject left image coordinates into 3D.
     baseline_distance = 10
-    focal_length = intrinsics[0][0]
-    points_3d = reproject_points(l_disparity_map, baseline_distance, focal_length, intrinsics)
+    focal_length = intrinsics_set1[0][0]
+    points_3d = reproject_points(l_disparity_map, baseline_distance, focal_length, intrinsics_set1)
     # return the reprojected points to the original camera plane.
-    reprojected_points = project_points(points_3d, intrinsics)
+    reprojected_points = project_points(points_3d, intrinsics_set1)
     # synthesize.
     reprojected_image = synthesize_image(reprojected_points, img_l)
 
