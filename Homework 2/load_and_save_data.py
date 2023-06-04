@@ -18,7 +18,6 @@ def load_data():
         # Read the max_disparity from max_disp.txt
         max_disparity = int(np.loadtxt(os.path.join(set_folder, "max_disp.txt")))
 
-        # Append the data for this set to the main list
         data.append((img_left, img_right, intrinsic_matrix, max_disparity))
 
     return data
@@ -38,8 +37,12 @@ def save_results(set_number, left_disparity_map, right_disparity_map, left_depth
         cv2.imwrite(os.path.join(target_dir, img_name), img)
 
     # Save disparity maps
-    left_disparity_map_normalized = normalize_image(left_disparity_map)
-    right_disparity_map_normalized = normalize_image(right_disparity_map)
+    max_value_left = np.max(left_disparity_map)
+    max_value_right = np.max(right_disparity_map)
+
+    # Normalize the depth map
+    left_disparity_map_normalized = (left_disparity_map / max_value_left) * 255
+    right_disparity_map_normalized = (right_disparity_map / max_value_right) * 255
 
     cv2.imwrite(os.path.join(target_dir, "disp_left.jpg"), left_disparity_map_normalized)
     cv2.imwrite(os.path.join(target_dir, "disp_right.jpg"), right_disparity_map_normalized)
@@ -52,11 +55,13 @@ def save_results(set_number, left_disparity_map, right_disparity_map, left_depth
     cv2.imwrite(os.path.join(target_dir, "depth_right.jpg"), right_depth_map_normalized)
 
 
-
 def normalize_image(image):
     max_value = np.max(image)
 
     # Normalize the depth map
     normalized_depth_map = (image / max_value) * 255
-    return cv2.convertScaleAbs(normalized_depth_map)
+    normalized_depth_map[normalized_depth_map > 40] = 0
+    max_value = np.max(normalized_depth_map)
+    normalized_depth_map = (normalized_depth_map / max_value) * 255
 
+    return cv2.convertScaleAbs(normalized_depth_map)

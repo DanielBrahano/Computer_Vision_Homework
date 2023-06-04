@@ -6,10 +6,11 @@ import numpy as np
 from matplotlib import pyplot as plt
 from load_and_save_data import *
 
-
 '''
 ---------------------------------COST VOLUME CALCULATION---------------------------------------
 '''
+
+
 def hamming_distance(arr1, arr2):
     return np.sum(arr1 != arr2)
 
@@ -96,8 +97,6 @@ def apply_census_transform(input_image_l: np.ndarray, input_image_r: np.ndarray,
     left_census_values = np.empty(shape=(height, width), dtype=object)
     right_census_values = np.empty(shape=(height, width), dtype=object)
 
-    print('\tComputing left and right census...', end='')
-    start_time = t.time()
 
     # Exclude pixels on the border (they will have no census values)
     for y in range(h, height - h):
@@ -114,8 +113,6 @@ def apply_census_transform(input_image_l: np.ndarray, input_image_r: np.ndarray,
                 input_image_r[y, x], dtype=np.float64)
             right_census_values[y, x] = calculate_census(block_r)
 
-    end_time = t.time()
-    print('\t(done in {:.2f}s)'.format(end_time - start_time))
 
     return left_census_values, right_census_values
 
@@ -163,9 +160,12 @@ def cost_aggregation(cost_volume_left, cost_volume_right, kernel_size=15, sigma=
     # cost_volume_right_agg = cv2.medianBlur(cost_volume_right, kernel_size)
     return cost_volume_left_agg, cost_volume_right_agg
 
+
 '''
 ------------------------------CALCULATE DEPTH--------------------------------------------
 '''
+
+
 def calculate_depth(disparity_map, baseline_dist, focal_length):
     # Create a mask to handle zeros in the disparity map
     mask = (disparity_map != 0)
@@ -178,6 +178,8 @@ def calculate_depth(disparity_map, baseline_dist, focal_length):
 '''
 -----------------------------GET DISPARITY--------------------------------------------
 '''
+
+
 def stereo_algorithm(im_left, im_right, max_disparity, height, width):
     # Convert the color images to grayscale
     gray_left = cv2.cvtColor(im_left, cv2.COLOR_BGR2GRAY)
@@ -253,7 +255,7 @@ def synthesize_image(reprojected_points, original_image):
 
 
 def reproject_to_3d(image, depth_map, intrinsic_matrix):
-    # First, we need to invert the intrinsic matrix
+    # First invert the intrinsic matrix
     inverted_intrinsics = np.linalg.inv(intrinsic_matrix)
 
     # Create an empty array to store the 3D points
@@ -323,7 +325,7 @@ def simulate_camera_positions(image, depth_map, intrinsic_matrix, baseline=10, n
         # Create a translation vector for this camera position
         translation_vector = np.array([t, 0, 0])
 
-        # Use your functions to reproject the image to 3D
+        # Use steps 3,4  functions to reproject the image to 3D
         points_3d = reproject_to_3d(image, depth_map, intrinsic_matrix)
 
         # Apply translation along the x-axis to the 3D points
@@ -332,8 +334,8 @@ def simulate_camera_positions(image, depth_map, intrinsic_matrix, baseline=10, n
         # Reproject the translated 3D points back to 2D
         reproject_image = reproject_to_2d(points_3d, intrinsic_matrix, image)
 
-        # Save the reprojected image to the specified location
-        cv2.imwrite(os.path.join(target_dir, "synth_"+str(i+1)+".jpg"), reproject_image)
+        # Save the reprojected image to the location specified in the ex2 document
+        cv2.imwrite(os.path.join(target_dir, "synth_" + str(i + 1) + ".jpg"), reproject_image)
 
 
 if __name__ == '__main__':
@@ -343,16 +345,23 @@ if __name__ == '__main__':
     width_census_window = 25
 
     for i, (img_left, img_right, intrinsic_matrix, max_disparity) in enumerate(data, 1):
-        print(f"Working on set {i}...")
+        start_time = t.time()
+        print(f"Working on set {i}:")
+        print('\tComputing disparity maps...', end='')
         left_disparity_map, right_disparity_map = stereo_algorithm(img_left, img_right, max_disparity,
                                                                    height_census_window,
                                                                    width_census_window)
+
+        print('\tComputing depth maps...', end='')
         left_depth_map = calculate_depth(left_disparity_map, 0.1, intrinsic_matrix[0][0])
-        right_depth_map = calculate_depth(right_disparity_map, 10, intrinsic_matrix[0][0])
+        right_depth_map = calculate_depth(right_disparity_map, 0.1, intrinsic_matrix[0][0])
 
         save_results(i, left_disparity_map, right_disparity_map, left_depth_map, right_depth_map)
 
+        print('\tComputing synthesize images...', end='')
         simulate_camera_positions(img_left, left_depth_map, intrinsic_matrix, set_num=i)
 
-    print("Done")
+        end_time = t.time()
+        print('\t(done in {:.2f}s)'.format(end_time - start_time))
 
+    print("Done")
