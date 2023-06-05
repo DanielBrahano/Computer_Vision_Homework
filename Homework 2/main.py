@@ -1,27 +1,29 @@
 import sys
 import time as t
-
+import os
 import cv2
 import numpy as np
 from matplotlib import pyplot as plt
+from load_and_save_data import *
 
 '''
 ---------------------------------COST VOLUME CALCULATION---------------------------------------
 '''
 
 
-def hamming_distance(ch1, ch2):
-    return bin(ch1 ^ ch2).count('1')
+def hamming_distance(arr1, arr2):
+    return np.sum(arr1 != arr2)
 
 
 def calculate_volume_cost(
         census_image_left: np.ndarray,
         census_image_right: np.ndarray,
         max_disparity: int,
-        window_size: int = 3
+        height=3,
+        width=3
 ) -> (np.ndarray, np.ndarray):
     # Padding the images
-    padding = max_disparity + window_size // 2
+    padding = max_disparity + max(height, width) // 2
     census_image_left = np.pad(census_image_left, padding, mode='constant')
     census_image_right = np.pad(census_image_right, padding, mode='constant')
 
@@ -78,8 +80,12 @@ def calculate_census(input_block: np.ndarray = None) -> int:
     return census_num
 
 
-def apply_census_transform(input_image_l: np.ndarray, input_image_r: np.ndarray, kernel_size: int) -> (
-        np.ndarray, np.ndarray):
+def calculate_census(block):
+    center_value = block[len(block) // 2, len(block[0]) // 2]
+    return block < center_value
+
+
+def apply_census_transform(input_image_l: np.ndarray, input_image_r: np.ndarray, h, w) -> (np.ndarray, np.ndarray):
     """ Census feature extraction. """
 
     height, width = input_image_l.shape
@@ -88,29 +94,25 @@ def apply_census_transform(input_image_l: np.ndarray, input_image_r: np.ndarray,
     input_image_l = normalize_data(input_image_l.astype(float))
     input_image_r = normalize_data(input_image_r.astype(float))
 
-    left_census_values = np.zeros(shape=(height, width), dtype=np.uint64)
-    right_census_values = np.zeros(shape=(height, width), dtype=np.uint64)
+    left_census_values = np.empty(shape=(height, width), dtype=object)
+    right_census_values = np.empty(shape=(height, width), dtype=object)
 
-    print('\tComputing left and right census...', end='')
-    start_time = t.time()
 
     # Exclude pixels on the border (they will have no census values)
-    for y in range(kernel_size, height - kernel_size):
-        for x in range(kernel_size, width - kernel_size):
+    for y in range(h, height - h):
+        for x in range(w, width - w):
             # extract block region from left image and compute its census value
             block_l = np.subtract(
-                input_image_l[y - kernel_size:y + kernel_size + 1, x - kernel_size:x + kernel_size + 1],
+                input_image_l[y - h:y + h + 1, x - w:x + w + 1],
                 input_image_l[y, x], dtype=np.float64)
             left_census_values[y, x] = calculate_census(block_l)
 
             # extract block region from right image and compute its census value
             block_r = np.subtract(
-                input_image_r[y - kernel_size:y + kernel_size + 1, x - kernel_size:x + kernel_size + 1],
+                input_image_r[y - h:y + h + 1, x - w:x + w + 1],
                 input_image_r[y, x], dtype=np.float64)
             right_census_values[y, x] = calculate_census(block_r)
 
-    end_time = t.time()
-    print('\t(done in {:.2f}s)'.format(end_time - start_time))
 
     return left_census_values, right_census_values
 
@@ -119,7 +121,7 @@ def apply_census_transform(input_image_l: np.ndarray, input_image_r: np.ndarray,
 """
 
 
-def left_right_consistency_test(disp_map_left, disp_map_right, threshold=1.0):
+def left_right_consistency_test(disp_map_left, disp_map_right, threshold=0):
     # Initialize two empty consistency maps
     height, width = disp_map_left.shape
     consistency_map_left = np.zeros((height, width), dtype=np.float32)
@@ -149,14 +151,19 @@ def left_right_consistency_test(disp_map_left, disp_map_right, threshold=1.0):
 '''
 
 
-def cost_aggregation(cost_volume_left, cost_volume_right, kernel_size=5, sigma=1.5):
+def cost_aggregation(cost_volume_left, cost_volume_right, kernel_size=15, sigma=1.5):
     # Apply Gaussian blur for local aggregation
-    cost_volume_left_agg = cv2.GaussianBlur(cost_volume_left, (kernel_size, kernel_size), sigma)
-    cost_volume_right_agg = cv2.GaussianBlur(cost_volume_right, (kernel_size, kernel_size), sigma)
+    cost_volume_left_agg = cv2.GaussianBlur(cost_volume_left, (kernel_size, kernel_size), 0)
+    cost_volume_right_agg = cv2.GaussianBlur(cost_volume_right, (kernel_size, kernel_size), 0)
 
-    #cost_volume_left_agg = cv2.medianBlur(cost_volume_left, kernel_size)
-    #cost_volume_right_agg = cv2.medianBlur(cost_volume_right, kernel_size)
+    # cost_volume_left_agg = cv2.medianBlur(cost_volume_left, kernel_size)
+    # cost_volume_right_agg = cv2.medianBlur(cost_volume_right, kernel_size)
     return cost_volume_left_agg, cost_volume_right_agg
+
+
+'''
+------------------------------CALCULATE DEPTH--------------------------------------------
+'''
 
 
 def calculate_depth(disparity_map, baseline_dist, focal_length):
@@ -168,15 +175,19 @@ def calculate_depth(disparity_map, baseline_dist, focal_length):
     depth_map[mask] = (focal_length * baseline_dist) / disparity_map[mask]
     return depth_map
 
+'''
+-----------------------------GET DISPARITY--------------------------------------------
+'''
 
-def stereo_algorithm(im_left, im_right, max_disparity, window_size=3):
+
+def stereo_algorithm(im_left, im_right, max_disparity, height, width):
     # Convert the color images to grayscale
     gray_left = cv2.cvtColor(im_left, cv2.COLOR_BGR2GRAY)
     gray_right = cv2.cvtColor(im_right, cv2.COLOR_BGR2GRAY)
 
-    gray_left, gray_right = apply_census_transform(gray_left, gray_right, window_size)
+    gray_left, gray_right = apply_census_transform(gray_left, gray_right, height, width)
 
-    cost_left, cost_right = calculate_volume_cost(gray_left, gray_right, max_disparity, window_size)
+    cost_left, cost_right = calculate_volume_cost(gray_left, gray_right, max_disparity, height, width)
 
     cost_left, cost_right = cost_aggregation(cost_left, cost_right)
 
@@ -208,6 +219,7 @@ def reproject_points(disparity_map, baseline_dist, focal_length, intrinsics):
 
     return points_3d
 
+
 def project_points(points_3d, intrinsics):
     """Return the reprojected points to the original camera plane."""
 
@@ -222,6 +234,7 @@ def project_points(points_3d, intrinsics):
     points_2d = points_2d[:, :2].reshape((height, width, 2))
 
     return points_2d
+
 
 def synthesize_image(reprojected_points, original_image):
     """Synthesize the reprojected image."""
@@ -241,76 +254,114 @@ def synthesize_image(reprojected_points, original_image):
     return reprojected_image
 
 
+def reproject_to_3d(image, depth_map, intrinsic_matrix):
+    # First invert the intrinsic matrix
+    inverted_intrinsics = np.linalg.inv(intrinsic_matrix)
+
+    # Create an empty array to store the 3D points
+    points_3d = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.float32)
+
+    # For each pixel in the image...
+    for v in range(image.shape[0]):
+        for u in range(image.shape[1]):
+            # Construct the 2D homogeneous coordinate
+            m = np.array([u, v, 1])
+
+            # Get the depth for this pixel
+            Z = depth_map[v, u]
+
+            # Compute the 3D point in the camera coordinate system
+            P = np.dot(inverted_intrinsics, m) * Z
+
+            # Store the 3D point
+            points_3d[v, u, :] = P
+
+    return points_3d
+
+
+def reproject_to_2d(points_3d, intrinsic_matrix, original_image):
+    # Initialize an empty array to store the reprojected 2D image
+    reprojected_image = np.zeros_like(original_image)
+
+    # Get the height and width of the image
+    height, width, _ = original_image.shape
+
+    # Iterate over the 3D points
+    for y in range(height):
+        for x in range(width):
+            # Get the 3D point
+            P = points_3d[y, x, :]
+
+            # Skip if the point is at infinity or depth is zero (not valid)
+            if P[2] == 0:
+                continue
+
+            # Project the point back to 2D
+            m = np.dot(intrinsic_matrix, P)
+
+            # Homogeneous to Cartesian coordinates
+            u, v = round(m[0] / m[2]), round(m[1] / m[2])
+
+            # Check if the reprojected point falls within the image boundaries
+            if 0 <= u < width and 0 <= v < height:
+                # Copy the pixel value from the original image
+                reprojected_image[v, u, :] = original_image[y, x, :]
+
+    return reprojected_image
+
+
+def simulate_camera_positions(image, depth_map, intrinsic_matrix, baseline=10, num_positions=11, set_num=0):
+    # Convert baseline from cm to meters
+    baseline /= 100.0
+
+    # Create an array of camera positions along the baseline
+    camera_positions = np.linspace(0, baseline, num_positions)
+
+    # Define target directory
+    target_dir = f"results/set_{set_num}"
+
+    # For each camera position...
+    for i, t in enumerate(camera_positions):
+        # Create a translation vector for this camera position
+        translation_vector = np.array([t, 0, 0])
+
+        # Use steps 3,4  functions to reproject the image to 3D
+        points_3d = reproject_to_3d(image, depth_map, intrinsic_matrix)
+
+        # Apply translation along the x-axis to the 3D points
+        points_3d[:, :, 0] -= translation_vector[0]
+
+        # Reproject the translated 3D points back to 2D
+        reproject_image = reproject_to_2d(points_3d, intrinsic_matrix, image)
+
+        # Save the reprojected image to the location specified in the ex2 document
+        cv2.imwrite(os.path.join(target_dir, "synth_" + str(i + 1) + ".jpg"), reproject_image)
+
+
 if __name__ == '__main__':
 
-    print('\nLoad images...')
+    data = load_data()
+    height_census_window = 13
+    width_census_window = 25
 
-    img_l = cv2.imread('data/set_1/im_left.jpg')
-    img_r = cv2.imread('data/set_1/im_right.jpg')
-    dawn = t.time()
+    for i, (img_left, img_right, intrinsic_matrix, max_disparity) in enumerate(data, 1):
+        start_time = t.time()
+        print(f"Working on set {i}:")
+        print('\tComputing disparity maps...', end='')
+        left_disparity_map, right_disparity_map = stereo_algorithm(img_left, img_right, max_disparity,
+                                                                   height_census_window,
+                                                                   width_census_window)
 
-    l_disparity_map, r_disparity_map = stereo_algorithm(img_l, img_r, 134, 3)
+        print('\tComputing depth maps...', end='')
+        left_depth_map = calculate_depth(left_disparity_map, 0.1, intrinsic_matrix[0][0])
+        right_depth_map = calculate_depth(right_disparity_map, 0.1, intrinsic_matrix[0][0])
 
-    np.save('data/set_1/disp_left.npy', l_disparity_map)
-    np.save('data/set_1/disp_right.npy', r_disparity_map)
+        save_results(i, left_disparity_map, right_disparity_map, left_depth_map, right_depth_map)
 
-    l_disparity_map = np.load('data/set_1/disp_left.npy')
-    r_disparity_map = np.load('data/set_1/disp_right.npy')
+        print('\tComputing synthesize images...', end='')
+        simulate_camera_positions(img_left, left_depth_map, intrinsic_matrix, set_num=i)
 
-    base_path = 'data/set_1/'
+        end_time = t.time()
+        print('\t(done in {:.2f}s)'.format(end_time - start_time))
 
-    intrinsics = np.loadtxt(base_path + "K.txt")
-    depth_left = calculate_depth(l_disparity_map, 10, intrinsics[0][0])
-    depth_right = calculate_depth(r_disparity_map, 10, intrinsics[0][0])
-
-    depth_left = depth_left/np.max(depth_left)*255
-    depth_right = depth_right/np.max(depth_right)*255
-    dusk = t.time()
-    print('\nTotal execution time = {:.2f}s'.format(dusk - dawn))
-
-    fig, axs = plt.subplots(2, 2, figsize=(10, 5))  # Create a figure with 1 row and 2 columns of subplots
-
-    # Show img1 in the first subplot
-    axs[0, 0].imshow(l_disparity_map, cmap='gray')  # Use cmap='gray' for grayscale images
-    axs[0, 0].axis('off')  # Hide the axes on this subplot
-    axs[0, 0].set_title('disp Image l')  # Set title for first image
-
-    # Show img2 in the second subplot
-    axs[0, 1].imshow(r_disparity_map, cmap='gray')  # Use cmap='gray' for grayscale images
-    axs[0, 1].axis('off')  # Hide the axes on this subplot
-    axs[0, 1].set_title('disp Image r')  # Set title for second image
-
-    # Show img1 in the first subplot
-    axs[1, 0].imshow(depth_left, cmap='gray')  # Use cmap='gray' for grayscale images
-    axs[1, 0].axis('off')  # Hide the axes on this subplot
-    axs[1, 0].set_title('depth_left')  # Set title for first image
-
-    # Show img2 in the second subplot
-    axs[1, 1].imshow(depth_right, cmap='gray')  # Use cmap='gray' for grayscale images
-    axs[1, 1].axis('off')  # Hide the axes on this subplot
-    axs[1, 1].set_title('depth_right')  # Set title for second image
-
-    plt.show()  # Display the figure with the images
-
-
-
-
-    # TODO: Hana added
-    # reproject left image coordinates into 3D.
-    baseline_distance = 10
-    focal_length = intrinsics[0][0]
-    points_3d = reproject_points(l_disparity_map, baseline_distance, focal_length, intrinsics)
-    # return the reprojected points to the original camera plane.
-    reprojected_points = project_points(points_3d, intrinsics)
-    # synthesize.
-    reprojected_image = synthesize_image(reprojected_points, img_l)
-
-    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-    axs[0].imshow(cv2.cvtColor(img_l, cv2.COLOR_BGR2RGB))
-    axs[0].axis('off')
-    axs[0].set_title('Original Left Image')
-    axs[1].imshow(cv2.cvtColor(reprojected_image, cv2.COLOR_BGR2RGB))
-    axs[1].axis('off')
-    axs[1].set_title('Reprojected Image')
-    plt.tight_layout()
-    plt.show()
+    print("Done")
